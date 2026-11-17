@@ -14,21 +14,74 @@ st.set_page_config(
 BASE = Path(__file__).resolve().parent
 DATA = BASE / "data"
 
-BLUE = "#0072B2"
-ORANGE = "#D55E00"
+# ── 국기 모티프 팔레트 ─────────────────────────────────────────
+# 일본: 흰 바탕 + 붉은 원(히노마루) / 베트남: 붉은 바탕 + 노란 별
+# 두 국기의 붉은색이 거의 같으므로 색이 아니라 채움(흰색/붉은색)과
+# 마커 모양(원/별)으로 구분한다. (흑백 인쇄·색각 이상에서도 구분됨)
+JP_RED = "#BC002D"
+VN_RED = "#DA251D"
+VN_YELLOW = "#FFCD00"
+VN_EDGE = "#8E1710"
+INK = "#222222"
+SUB = "#6B6B6B"
+PANEL_BG = "#F6F4F1"
 
 STYLE = {
     "일본": {
-        "color": BLUE,
+        "color": JP_RED,
+        "text": JP_RED,
         "symbol": "circle",
-        "dash": "solid"
+        "dash": "solid",
+        "fill": "#FFFFFF",
+        "marker_fill": JP_RED,
+        "marker_line": "#FFFFFF",
     },
     "베트남": {
-        "color": ORANGE,
-        "symbol": "square",
-        "dash": "dash"
-    }
+        "color": VN_RED,
+        "text": VN_EDGE,
+        "symbol": "star",
+        "dash": "dash",
+        "fill": VN_RED,
+        "marker_fill": VN_YELLOW,
+        "marker_line": VN_EDGE,
+    },
 }
+SMALL_N = 30  # 표본이 이보다 적으면 † 표시
+
+
+def style_fig(fig, height):
+    fig.update_layout(
+        plot_bgcolor=PANEL_BG,
+        paper_bgcolor="white",
+        height=height,
+        font=dict(color=INK),
+        margin=dict(t=25, b=50),
+    )
+    fig.update_xaxes(gridcolor="white", gridwidth=1.5, zeroline=False,
+                     linecolor="#BDB8B0", ticks="")
+    fig.update_yaxes(gridcolor="white", gridwidth=1.5, zeroline=False,
+                     ticks="")
+    return fig
+
+
+def flag_banner():
+    """제목 옆에 쓰는 미니 국기(CSS)"""
+    st.markdown(
+        """
+        <div style="display:flex;gap:10px;align-items:center;margin-bottom:4px">
+          <div style="width:42px;height:28px;background:#fff;border:2px solid #BC002D;
+                      display:flex;align-items:center;justify-content:center;">
+            <div style="width:14px;height:14px;border-radius:50%;background:#BC002D"></div>
+          </div>
+          <div style="width:42px;height:28px;background:#DA251D;border:2px solid #DA251D;
+                      display:flex;align-items:center;justify-content:center;
+                      color:#FFCD00;font-size:18px;line-height:1">★</div>
+          <span style="color:#6B6B6B;font-size:0.9rem">일본 · 베트남</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
 
 @st.cache_data
 def load_data():
@@ -43,6 +96,7 @@ def load_data():
 
 duration, models, slopes, sensitivity, meta = load_data()
 
+flag_banner()
 st.title("✈️ 여행기간이 길어질 때, 소비지출은 두 나라에서 같을까?")
 st.caption(
     "2025년 국민여행조사 | 일본·베트남 비교 | "
@@ -89,30 +143,34 @@ with left:
         ].sort_values("days")
 
         s = STYLE[country]
+        vals = part["mean_cost"] / 10000
+        labels = [
+            f"{v:.1f}" + ("†" if n < SMALL_N else "")
+            for v, n in zip(vals, part["n"])
+        ]
 
         fig.add_trace(go.Scatter(
             x=part["days"],
-            y=part["mean_cost"] / 10000,
+            y=vals,
             name=country,
             mode="lines+markers+text",
-            text=[
-                f"{v:.1f}"
-                for v in part["mean_cost"] / 10000
-            ],
+            text=labels,
             textposition=(
                 "top center"
                 if country == "일본"
                 else "bottom center"
             ),
+            textfont=dict(color=s["text"], size=13),
             line=dict(
                 color=s["color"],
-                width=3,
+                width=3.5,
                 dash=s["dash"]
             ),
             marker=dict(
-                color=s["color"],
+                color=s["marker_fill"],
                 symbol=s["symbol"],
-                size=12
+                size=14 if country == "일본" else 20,
+                line=dict(color=s["marker_line"], width=2)
             ),
             customdata=part["n"],
             hovertemplate=(
@@ -123,9 +181,8 @@ with left:
             )
         ))
 
+    style_fig(fig, 440)
     fig.update_layout(
-        plot_bgcolor="white",
-        height=440,
         xaxis=dict(
             title="여행일수 (일)",
             dtick=1
@@ -135,7 +192,6 @@ with left:
             rangemode="tozero"
         ),
         legend_title_text="방문국가",
-        margin=dict(t=25, b=50)
     )
     st.plotly_chart(fig, use_container_width=True)
 
@@ -145,40 +201,78 @@ with right:
 
     fig_n = go.Figure()
 
+    all_days = sorted(shown["days"].unique())
+    ymax = float(shown["n"].max()) if len(shown) else 1.0
+    offsets = {"일본": -0.19, "베트남": 0.19}
+
     for country in selected:
         part = shown[
             shown["country"] == country
         ].sort_values("days")
 
         s = STYLE[country]
+        off = offsets[country] if len(selected) > 1 else 0.0
+        xs = part["days"] + off
 
+        # 막대: 일본 = 흰 바탕 + 붉은 테두리 / 베트남 = 붉은 바탕
         fig_n.add_trace(go.Bar(
-            x=part["days"].astype(str) + "일",
+            x=xs,
             y=part["n"],
+            width=0.34,
             name=country,
+            showlegend=False,
             marker=dict(
-                color=s["color"],
-                pattern=dict(
-                    shape="/" if country == "베트남" else ""
-                )
+                color=s["fill"],
+                line=dict(color=s["color"], width=2)
             ),
-            text=part["n"],
-            textposition="outside"
+            hoverinfo="skip"
         ))
 
+        # 막대 위 국기 마커(원/별) + 건수
+        fig_n.add_trace(go.Scatter(
+            x=xs,
+            y=part["n"] + ymax * 0.07,
+            name=country,
+            mode="markers+text",
+            text=part["n"].astype(str),
+            textposition="top center",
+            textfont=dict(color=INK, size=13),
+            marker=dict(
+                color=s["marker_fill"],
+                symbol=s["symbol"],
+                size=13 if country == "일본" else 20,
+                line=dict(
+                    color=s["marker_line"] if country == "베트남" else s["color"],
+                    width=1.5
+                )
+            ),
+            customdata=part["n"],
+            hovertemplate=(
+                f"{country}<br>"
+                "기록 수: %{customdata}건<extra></extra>"
+            )
+        ))
+
+    style_fig(fig_n, 440)
     fig_n.update_layout(
-        barmode="group",
-        plot_bgcolor="white",
-        height=440,
-        xaxis_title="여행일수",
-        yaxis_title="표본 수 (건)",
+        xaxis=dict(
+            title="여행일수",
+            tickmode="array",
+            tickvals=all_days,
+            ticktext=[f"{int(d)}일" for d in all_days],
+            range=[min(all_days) - 0.6, max(all_days) + 0.6]
+        ),
+        yaxis=dict(
+            title="표본 수 (건)",
+            range=[0, ymax * 1.35]
+        ),
         legend_title_text="방문국가",
-        margin=dict(t=25, b=50)
     )
     st.plotly_chart(fig_n, use_container_width=True)
 
 st.caption(
     "두 그래프는 3~6일 여행의 집계값입니다. "
+    f"†는 표본 {SMALL_N}건 미만으로 평균이 불안정할 수 있음을 뜻합니다. "
     "7일 여행은 국가별 표본 수가 20건 미만이므로 "
     "상세 그래프에서 표시하지 않았습니다."
 )
@@ -203,20 +297,28 @@ for country in selected:
     fig_beta.add_trace(go.Scatter(
         x=[row["beta"]],
         y=[country],
-        mode="markers",
+        mode="markers+text",
         name=country,
+        text=[f"{row['beta']:.3f}"],
+        textposition="bottom center",
+        textfont=dict(color=INK, size=14),
         marker=dict(
-            size=15,
-            color=s["color"],
-            symbol=s["symbol"]
+            size=17 if country == "일본" else 26,
+            color=s["marker_fill"],
+            symbol=s["symbol"],
+            line=dict(
+                color=s["marker_line"] if country == "베트남" else "#FFFFFF",
+                width=2
+            )
         ),
         error_x=dict(
             type="data",
             symmetric=False,
             array=[row["high"] - row["beta"]],
             arrayminus=[row["beta"] - row["low"]],
-            width=7,
-            thickness=2
+            width=8,
+            thickness=3,
+            color=s["color"]
         ),
         hovertemplate=(
             f"{country}<br>"
@@ -225,19 +327,25 @@ for country in selected:
     ))
 
 fig_beta.add_vline(
+    x=0,
+    line_color="#BDB8B0",
+    line_width=1
+)
+fig_beta.add_vline(
     x=1,
     line_dash="dot",
-    line_color="#64748B",
+    line_color=SUB,
     annotation_text="비례 관계: 1"
 )
 
+style_fig(fig_beta, 350)
 fig_beta.update_layout(
     xaxis_title="기간–지출 탄력성 및 95% 신뢰구간",
     yaxis_title="방문국가",
-    plot_bgcolor="white",
-    height=350,
-    showlegend=False
+    showlegend=False,
+    margin=dict(t=25, b=50, l=60),
 )
+fig_beta.update_yaxes(autorange="reversed")
 
 st.plotly_chart(fig_beta, use_container_width=True)
 
